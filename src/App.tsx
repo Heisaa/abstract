@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS: FilterSettings = {
   edgeStrength: 0.82,
   slicSize: 36,
   slicCompactness: 12,
+  slicSaturationPreserve: 0.55,
   felzenszwalbScale: 450,
   felzenszwalbMinSize: 48,
   adaptiveLargeBrush: 56,
@@ -25,12 +26,28 @@ const DEFAULT_SETTINGS: FilterSettings = {
   adaptiveSmallBrush: 14,
   adaptiveDetailThreshold: 0.45,
   adaptiveDetailStrength: 0.45,
+  flowBrushLength: 44,
+  flowBrushWidth: 7,
+  flowSmoothing: 4,
+  flowColorMerge: 0.62,
+  flowEdgePreserve: 0.55,
+  flowStrokeStrength: 0.95,
+  strokeAbstraction: 0.68,
+  strokeSize: 14,
+  strokeLength: 3.2,
+  strokeDetail: 0.28,
+  strokeEdgeFidelity: 0.66,
+  strokeColorSimplification: 0.52,
+  strokeTextureStrength: 0.58,
+  strokeLayers: 3,
 }
 
 const FILTERS: Array<{ id: FilterId; label: string }> = [
   { id: 'kuwahara', label: 'Kuwahara' },
   { id: 'posterize', label: 'Value' },
   { id: 'edges', label: 'Edges' },
+  { id: 'strokePainter', label: 'Stroke Painter' },
+  { id: 'flowBrush', label: 'Flow Brush' },
   { id: 'slic', label: 'SLIC' },
   { id: 'adaptiveBrush', label: 'Adaptive Brush' },
   { id: 'felzenszwalb', label: 'Felzenszwalb' },
@@ -512,10 +529,36 @@ function App() {
             </>
           ) : null}
 
+          {settings.filter === 'flowBrush' ? (
+            <>
+              <Slider label="Stroke Length" min={4} max={72} step={1} value={settings.flowBrushLength} onChange={(value) => updateSetting('flowBrushLength', value)} />
+              <Slider label="Stroke Width" min={1} max={18} step={1} value={settings.flowBrushWidth} onChange={(value) => updateSetting('flowBrushWidth', value)} />
+              <Slider label="Flow Smoothing" min={1} max={6} step={0.5} value={settings.flowSmoothing} onChange={(value) => updateSetting('flowSmoothing', value)} />
+              <Slider label="Color Merge" min={0} max={1} step={0.01} value={settings.flowColorMerge} onChange={(value) => updateSetting('flowColorMerge', value)} />
+              <Slider label="Edge Preserve" min={0} max={1} step={0.01} value={settings.flowEdgePreserve} onChange={(value) => updateSetting('flowEdgePreserve', value)} />
+              <Slider label="Stroke Strength" min={0} max={1} step={0.01} value={settings.flowStrokeStrength} onChange={(value) => updateSetting('flowStrokeStrength', value)} />
+              <Slider label="Contrast" min={0.5} max={2} step={0.05} value={settings.contrast} onChange={(value) => updateSetting('contrast', value)} />
+            </>
+          ) : null}
+
+          {settings.filter === 'strokePainter' ? (
+            <>
+              <Slider label="Abstraction" min={0} max={1} step={0.01} value={settings.strokeAbstraction} onChange={(value) => updateSetting('strokeAbstraction', value)} />
+              <Slider label="Stroke Size" min={4} max={32} step={1} value={settings.strokeSize} onChange={(value) => updateSetting('strokeSize', value)} />
+              <Slider label="Stroke Length" min={1} max={5} step={0.1} value={settings.strokeLength} onChange={(value) => updateSetting('strokeLength', value)} />
+              <Slider label="Detail Amount" min={0} max={1} step={0.01} value={settings.strokeDetail} onChange={(value) => updateSetting('strokeDetail', value)} />
+              <Slider label="Edge Fidelity" min={0} max={1} step={0.01} value={settings.strokeEdgeFidelity} onChange={(value) => updateSetting('strokeEdgeFidelity', value)} />
+              <Slider label="Color Simplify" min={0} max={1} step={0.01} value={settings.strokeColorSimplification} onChange={(value) => updateSetting('strokeColorSimplification', value)} />
+              <Slider label="Texture" min={0} max={1} step={0.01} value={settings.strokeTextureStrength} onChange={(value) => updateSetting('strokeTextureStrength', value)} />
+              <Slider label="Layers" min={1} max={4} step={1} value={settings.strokeLayers} onChange={(value) => updateSetting('strokeLayers', value)} />
+            </>
+          ) : null}
+
           {settings.filter === 'slic' ? (
             <>
               <Slider label="Region Size" min={8} max={96} step={1} value={settings.slicSize} onChange={(value) => updateSetting('slicSize', value)} />
               <Slider label="Compactness" min={1} max={40} step={1} value={settings.slicCompactness} onChange={(value) => updateSetting('slicCompactness', value)} />
+              <Slider label="Saturation Preserve" min={0} max={1} step={0.01} value={settings.slicSaturationPreserve} onChange={(value) => updateSetting('slicSaturationPreserve', value)} />
             </>
           ) : null}
 
