@@ -21,6 +21,10 @@ const DEFAULT_SETTINGS: FilterSettings = {
   slicSaturationPreserve: 0.55,
   felzenszwalbScale: 450,
   felzenszwalbMinSize: 48,
+  colorCheckScale: 700,
+  colorCheckMinSize: 120,
+  colorCheckSaturation: 0.4,
+  colorCheckSeparator: 0,
   adaptiveLargeBrush: 56,
   adaptiveMediumBrush: 28,
   adaptiveSmallBrush: 14,
@@ -40,6 +44,14 @@ const DEFAULT_SETTINGS: FilterSettings = {
   strokeColorSimplification: 0.52,
   strokeTextureStrength: 0.58,
   strokeLayers: 3,
+  detailAbstraction: 0.6,
+  detailSize: 14,
+  detailLength: 2.6,
+  detailFineness: 0.6,
+  detailEdgeFidelity: 0.66,
+  detailColorSimplification: 0.5,
+  detailTextureStrength: 0.5,
+  detailLayers: 3,
 }
 
 const FILTERS: Array<{ id: FilterId; label: string }> = [
@@ -47,10 +59,12 @@ const FILTERS: Array<{ id: FilterId; label: string }> = [
   { id: 'posterize', label: 'Value' },
   { id: 'edges', label: 'Edges' },
   { id: 'strokePainter', label: 'Stroke Painter' },
+  { id: 'detailPainter', label: 'Detail Painter' },
   { id: 'flowBrush', label: 'Flow Brush' },
   { id: 'slic', label: 'SLIC' },
   { id: 'adaptiveBrush', label: 'Adaptive Brush' },
   { id: 'felzenszwalb', label: 'Felzenszwalb' },
+  { id: 'colorCheck', label: 'Color Check' },
 ]
 
 const IMAGE_FILE_EXTENSIONS = ['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.jfif', '.png', '.webp']
@@ -554,6 +568,19 @@ function App() {
             </>
           ) : null}
 
+          {settings.filter === 'detailPainter' ? (
+            <>
+              <Slider label="Abstraction" min={0} max={1} step={0.01} value={settings.detailAbstraction} onChange={(value) => updateSetting('detailAbstraction', value)} />
+              <Slider label="Stroke Size" min={4} max={32} step={1} value={settings.detailSize} onChange={(value) => updateSetting('detailSize', value)} />
+              <Slider label="Stroke Length" min={1} max={5} step={0.1} value={settings.detailLength} onChange={(value) => updateSetting('detailLength', value)} />
+              <Slider label="Detail" min={0} max={1} step={0.01} value={settings.detailFineness} onChange={(value) => updateSetting('detailFineness', value)} />
+              <Slider label="Edge Fidelity" min={0} max={1} step={0.01} value={settings.detailEdgeFidelity} onChange={(value) => updateSetting('detailEdgeFidelity', value)} />
+              <Slider label="Color Simplify" min={0} max={1} step={0.01} value={settings.detailColorSimplification} onChange={(value) => updateSetting('detailColorSimplification', value)} />
+              <Slider label="Texture" min={0} max={1} step={0.01} value={settings.detailTextureStrength} onChange={(value) => updateSetting('detailTextureStrength', value)} />
+              <Slider label="Layers" min={1} max={4} step={1} value={settings.detailLayers} onChange={(value) => updateSetting('detailLayers', value)} />
+            </>
+          ) : null}
+
           {settings.filter === 'slic' ? (
             <>
               <Slider label="Region Size" min={8} max={96} step={1} value={settings.slicSize} onChange={(value) => updateSetting('slicSize', value)} />
@@ -576,6 +603,15 @@ function App() {
             <>
               <Slider label="Scale" min={50} max={1500} step={10} value={settings.felzenszwalbScale} onChange={(value) => updateSetting('felzenszwalbScale', value)} />
               <Slider label="Min Size" min={4} max={300} step={1} value={settings.felzenszwalbMinSize} onChange={(value) => updateSetting('felzenszwalbMinSize', value)} />
+            </>
+          ) : null}
+
+          {settings.filter === 'colorCheck' ? (
+            <>
+              <Slider label="Field Size" min={50} max={1500} step={10} value={settings.colorCheckScale} onChange={(value) => updateSetting('colorCheckScale', value)} />
+              <Slider label="Min Field Size" min={16} max={600} step={4} value={settings.colorCheckMinSize} onChange={(value) => updateSetting('colorCheckMinSize', value)} />
+              <Slider label="Saturation" min={0} max={1} step={0.01} value={settings.colorCheckSaturation} onChange={(value) => updateSetting('colorCheckSaturation', value)} />
+              <Slider label="Separator" min={0} max={3} step={1} value={settings.colorCheckSeparator} onChange={(value) => updateSetting('colorCheckSeparator', value)} />
             </>
           ) : null}
 

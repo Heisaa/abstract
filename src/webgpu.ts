@@ -5,9 +5,11 @@ export type FilterId =
   | 'edges'
   | 'flowBrush'
   | 'strokePainter'
+  | 'detailPainter'
   | 'slic'
   | 'felzenszwalb'
   | 'adaptiveBrush'
+  | 'colorCheck'
 
 export type FilterSettings = {
   filter: FilterId
@@ -22,6 +24,10 @@ export type FilterSettings = {
   slicSaturationPreserve: number
   felzenszwalbScale: number
   felzenszwalbMinSize: number
+  colorCheckScale: number
+  colorCheckMinSize: number
+  colorCheckSaturation: number
+  colorCheckSeparator: number
   adaptiveLargeBrush: number
   adaptiveMediumBrush: number
   adaptiveSmallBrush: number
@@ -41,6 +47,14 @@ export type FilterSettings = {
   strokeColorSimplification: number
   strokeTextureStrength: number
   strokeLayers: number
+  detailAbstraction: number
+  detailSize: number
+  detailLength: number
+  detailFineness: number
+  detailEdgeFidelity: number
+  detailColorSimplification: number
+  detailTextureStrength: number
+  detailLayers: number
 }
 
 export type LoadedImage = {
@@ -74,6 +88,8 @@ const FILTER_INDEX: Record<FilterId, number> = {
   slic: 6,
   felzenszwalb: 7,
   adaptiveBrush: 8,
+  detailPainter: 9,
+  colorCheck: 10,
 }
 
 const MAX_WORKING_IMAGE_DIMENSION = 1280
@@ -322,7 +338,7 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
     color = edges(input.uv);
   } else if (uniforms.filterMode > 3.5 && uniforms.filterMode < 4.5) {
     color = flowBrush(input.uv);
-  } else if (uniforms.filterMode > 4.5 && uniforms.filterMode < 8.5) {
+  } else if (uniforms.filterMode > 4.5 && uniforms.filterMode < 10.5) {
     color = sampleSegments(input.uv);
   }
 
@@ -879,7 +895,9 @@ export class WebGpuImageRenderer {
       (settings.filter !== 'slic' &&
         settings.filter !== 'felzenszwalb' &&
         settings.filter !== 'adaptiveBrush' &&
-        settings.filter !== 'strokePainter')
+        settings.filter !== 'strokePainter' &&
+        settings.filter !== 'detailPainter' &&
+        settings.filter !== 'colorCheck')
     ) {
       return
     }
@@ -901,6 +919,11 @@ export class WebGpuImageRenderer {
       )
       this.segmentTexture?.destroy()
       this.segmentTexture = this.createTextureFromPixels(pixels, this.image.width, this.image.height)
+    } else if (settings.filter === 'colorCheck') {
+      const edgeWeights = await this.createFelzenszwalbWeightsGpu()
+      const pixels = createColorCheckPixels(this.image, settings, edgeWeights)
+      this.segmentTexture?.destroy()
+      this.segmentTexture = this.createTextureFromPixels(pixels, this.image.width, this.image.height)
     } else if (settings.filter === 'adaptiveBrush') {
       const pixels = createAdaptiveBrushSegments(
         this.image,
@@ -912,8 +935,12 @@ export class WebGpuImageRenderer {
       )
       this.segmentTexture?.destroy()
       this.segmentTexture = this.createTextureFromPixels(pixels, this.image.width, this.image.height)
-    } else {
+    } else if (settings.filter === 'strokePainter') {
       const pixels = createStrokePainterPixels(this.image, settings)
+      this.segmentTexture?.destroy()
+      this.segmentTexture = this.createTextureFromPixels(pixels, this.image.width, this.image.height)
+    } else {
+      const pixels = createDetailPainterPixels(this.image, settings)
       this.segmentTexture?.destroy()
       this.segmentTexture = this.createTextureFromPixels(pixels, this.image.width, this.image.height)
     }
@@ -931,6 +958,10 @@ export class WebGpuImageRenderer {
       return `felzenszwalb:${settings.felzenszwalbScale}:${settings.felzenszwalbMinSize}`
     }
 
+    if (settings.filter === 'colorCheck') {
+      return `colorCheck:${settings.colorCheckScale}:${settings.colorCheckMinSize}:${settings.colorCheckSaturation}:${settings.colorCheckSeparator}`
+    }
+
     if (settings.filter === 'strokePainter') {
       return [
         'strokePainter',
@@ -942,6 +973,20 @@ export class WebGpuImageRenderer {
         settings.strokeColorSimplification,
         settings.strokeTextureStrength,
         settings.strokeLayers,
+      ].join(':')
+    }
+
+    if (settings.filter === 'detailPainter') {
+      return [
+        'detailPainter',
+        settings.detailAbstraction,
+        settings.detailSize,
+        settings.detailLength,
+        settings.detailFineness,
+        settings.detailEdgeFidelity,
+        settings.detailColorSimplification,
+        settings.detailTextureStrength,
+        settings.detailLayers,
       ].join(':')
     }
 
@@ -1248,6 +1293,16 @@ function createFelzenszwalbSegments(
   requestedMinSize: number,
   computedWeights?: Float32Array,
 ) {
+  const { labels, labelCount } = computeFelzenszwalbLabels(image, requestedScale, requestedMinSize, computedWeights)
+  return labelsToAveragePixels(image.pixels, labels, labelCount)
+}
+
+function computeFelzenszwalbLabels(
+  image: LoadedImage,
+  requestedScale: number,
+  requestedMinSize: number,
+  computedWeights?: Float32Array,
+) {
   const { width, height, pixels } = image
   const count = width * height
   const horizontalCount = Math.max(0, (width - 1) * height)
@@ -1353,7 +1408,7 @@ function createFelzenszwalbSegments(
     labels[index] = label
   }
 
-  return labelsToAveragePixels(pixels, labels, rootToLabel.size)
+  return { labels, labelCount: rootToLabel.size }
 }
 
 function addEdge(
@@ -1501,6 +1556,270 @@ function createStrokePainterPixels(image: LoadedImage, settings: FilterSettings)
   }
 
   return context.getImageData(0, 0, width, height).data
+}
+
+// Detail Painter is a stroke-painter variant tuned to (1) avoid the square
+// artifacts that appear at low stroke length and (2) drive stroke size and
+// density from how much the color is shifting locally, controlled by the
+// "Detail" (fineness) slider.
+function createDetailPainterPixels(image: LoadedImage, settings: FilterSettings) {
+  const { width, height, pixels } = image
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) {
+    throw new Error('Could not create the detail painting canvas.')
+  }
+
+  const abstraction = clamp(settings.detailAbstraction, 0, 1)
+  const fineness = clamp(settings.detailFineness, 0, 1)
+  const edgeFidelity = clamp(settings.detailEdgeFidelity, 0, 1)
+  const simplification = clamp(settings.detailColorSimplification, 0, 1)
+  const textureStrength = clamp(settings.detailTextureStrength, 0, 1)
+  const baseSize = Math.max(3, Math.round(settings.detailSize))
+  const lengthScale = clamp(settings.detailLength, 1, 5)
+  const layers = Math.max(1, Math.min(4, Math.round(settings.detailLayers)))
+
+  const edgeMap = createPixelDetailMap(pixels, width, height)
+  const colorActivity = createColorActivityMap(pixels, width, height, baseSize)
+  const flowField = createStrokeFlowField(pixels, width, height, Math.max(8, Math.round(baseSize * 2.2)))
+
+  // Smooth, gradient-filled base instead of hard-edged color blocks so that
+  // gaps between short strokes never reveal square underpainting tiles.
+  paintSmoothUnderpainting(context, image, baseSize, abstraction, simplification)
+
+  const layerScale = [3.8, 2.05, 1.02, 0.52]
+  for (let layer = 0; layer < layers; layer += 1) {
+    const layerSize = Math.max(2, baseSize * layerScale[layer])
+    const fineLayer = layer / Math.max(1, layers - 1)
+    // Higher fineness tightens the sampling grid so detailed passes lay down
+    // more, smaller strokes.
+    const spacing = Math.max(1.5, layerSize * (layer === 0 ? 1.05 : 0.74 - fineness * 0.3))
+    const alpha = 0.82 - fineLayer * 0.18
+
+    for (let y = -spacing; y < height + spacing; y += spacing) {
+      for (let x = -spacing; x < width + spacing; x += spacing) {
+        const jitterSeed = layer * 0x9e37 + Math.floor(x / spacing) * 193 + Math.floor(y / spacing) * 977
+        const jitter = layer < 2 ? 0.42 : 0.58
+        const px = Math.round(x + (hashToUnit(jitterSeed, layer, 0x2471) - 0.5) * spacing * jitter)
+        const py = Math.round(y + (hashToUnit(jitterSeed, layer, 0x71b5) - 0.5) * spacing * jitter)
+        if (px < 0 || py < 0 || px >= width || py >= height) {
+          continue
+        }
+
+        const index = px + py * width
+        const shift = colorActivity[index]
+        const edge = edgeMap[index]
+        const detail = clamp(Math.max(shift, edge * 0.7), 0, 1)
+
+        // Coarse layers cover everything; fine layers concentrate where the
+        // color is shifting, with the "Detail" slider boosting their reach.
+        const broadProbability = layer === 0 ? 1 : 0.74 - abstraction * 0.22
+        const detailProbability = smoothstep(0.12, 0.7, shift) * (0.3 + fineness * 0.7)
+        const probability = layer < 2 ? broadProbability : clamp(0.05 + detailProbability, 0, 1)
+        if (hashToUnit(px, py, layer * 0x5151) > probability) {
+          continue
+        }
+
+        const gradient = luminanceGradient(pixels, width, height, px, py)
+        const flow = sampleStrokeFlow(flowField, px, py)
+        const edgeStrength = clamp(gradient.strength * 3.8, 0, 1)
+        const localAngle = Math.atan2(gradient.y, gradient.x) + Math.PI * 0.5
+        const coherentFallback = coherentFlowAngle(px, py, width, height)
+        const flowAngle = flow.confidence > 0.02 ? flow.angle : coherentFallback
+        const localInfluence = smoothstep(0.42, 0.92, detail) * edgeFidelity
+        const randomWobble = (hashToUnit(px, py, layer * 0xa53d) - 0.5) * (0.18 + fineLayer * 0.22)
+        const angle = blendAngles(flowAngle, localAngle, localInfluence) + randomWobble
+
+        // Shrink strokes in busy areas (scaled by fineness) for finer detail.
+        const detailShrink = 1 - shift * fineness * 0.72
+        const edgeLimiter = 1 - edgeStrength * edgeFidelity * 0.64
+        const quietAreaBoost = 1 + (1 - detail) * abstraction * (layer < 2 ? 0.95 : 0.25)
+        let strokeWidth = layerSize * (0.6 - fineLayer * 0.2) * (1 + (1 - detail) * abstraction * 0.3) * detailShrink
+        strokeWidth = Math.max(1.2, strokeWidth)
+        let strokeLength = layerSize * lengthScale * (1.2 - fineLayer * 0.32) * edgeLimiter * quietAreaBoost * detailShrink
+        // Keep every stroke elongated so short strokes read as marks, not squares.
+        strokeLength = Math.max(strokeLength, strokeWidth * 1.7)
+
+        const color = quantizedPixelColor(pixels, width, height, px, py, simplification)
+        const valueShift = (hashToUnit(px, py, layer * 0x345f) - 0.5) * 18 * textureStrength
+
+        drawTaperedStroke(context, {
+          x: px,
+          y: py,
+          angle,
+          length: strokeLength,
+          width: strokeWidth,
+          color: shiftColor(color, valueShift),
+          alpha: alpha * (0.86 + hashToUnit(py, px, layer * 0x8849) * 0.2),
+          textureStrength,
+          seed: px * 17 + py * 31 + layer * 101,
+        })
+      }
+    }
+  }
+
+  return context.getImageData(0, 0, width, height).data
+}
+
+// Regional measure of how much the color is shifting: per-pixel RGB gradient
+// magnitude, box-blurred so it reflects busy neighborhoods rather than single
+// edges, then normalized to 0..1.
+function createColorActivityMap(pixels: Uint8ClampedArray, width: number, height: number, baseSize: number) {
+  const raw = new Float32Array(width * height)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const gx = pixelColorDistance(pixels, width, height, x - 1, y, x + 1, y)
+      const gy = pixelColorDistance(pixels, width, height, x, y - 1, x, y + 1)
+      raw[x + y * width] = Math.sqrt(gx * gx + gy * gy)
+    }
+  }
+
+  const radius = Math.max(2, Math.round(baseSize * 0.9))
+  const blurred = boxBlurFloat(raw, width, height, radius)
+  normalizePixelDetailMap(blurred)
+  return blurred
+}
+
+function pixelColorDistance(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+) {
+  const aClampedX = Math.max(0, Math.min(width - 1, ax))
+  const aClampedY = Math.max(0, Math.min(height - 1, ay))
+  const bClampedX = Math.max(0, Math.min(width - 1, bx))
+  const bClampedY = Math.max(0, Math.min(height - 1, by))
+  const aOffset = (aClampedX + aClampedY * width) * 4
+  const bOffset = (bClampedX + bClampedY * width) * 4
+  const dr = pixels[aOffset] - pixels[bOffset]
+  const dg = pixels[aOffset + 1] - pixels[bOffset + 1]
+  const db = pixels[aOffset + 2] - pixels[bOffset + 2]
+  return Math.sqrt(dr * dr + dg * dg + db * db)
+}
+
+function boxBlurFloat(src: Float32Array, width: number, height: number, radius: number) {
+  const window = radius * 2 + 1
+  const temp = new Float32Array(width * height)
+  const out = new Float32Array(width * height)
+
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width
+    let sum = 0
+    for (let k = -radius; k <= radius; k += 1) {
+      sum += src[row + Math.max(0, Math.min(width - 1, k))]
+    }
+    for (let x = 0; x < width; x += 1) {
+      temp[row + x] = sum / window
+      const addX = Math.max(0, Math.min(width - 1, x + radius + 1))
+      const subX = Math.max(0, Math.min(width - 1, x - radius))
+      sum += src[row + addX] - src[row + subX]
+    }
+  }
+
+  for (let x = 0; x < width; x += 1) {
+    let sum = 0
+    for (let k = -radius; k <= radius; k += 1) {
+      sum += temp[x + Math.max(0, Math.min(height - 1, k)) * width]
+    }
+    for (let y = 0; y < height; y += 1) {
+      out[x + y * width] = sum / window
+      const addY = Math.max(0, Math.min(height - 1, y + radius + 1))
+      const subY = Math.max(0, Math.min(height - 1, y - radius))
+      sum += temp[x + addY * width] - temp[x + subY * width]
+    }
+  }
+
+  return out
+}
+
+function paintSmoothUnderpainting(
+  context: CanvasRenderingContext2D,
+  image: LoadedImage,
+  baseSize: number,
+  abstraction: number,
+  simplification: number,
+) {
+  const { width, height, pixels } = image
+  const blockSize = Math.max(6, Math.round(baseSize * (2.4 + abstraction * 4.0)))
+  const lowWidth = Math.max(1, Math.ceil(width / blockSize))
+  const lowHeight = Math.max(1, Math.ceil(height / blockSize))
+
+  const lowCanvas = document.createElement('canvas')
+  lowCanvas.width = lowWidth
+  lowCanvas.height = lowHeight
+  const lowContext = lowCanvas.getContext('2d')
+  if (!lowContext) {
+    // Fall back to the blocky base if the low-res canvas is unavailable.
+    paintUnderpainting(context, image, baseSize, abstraction, simplification)
+    return
+  }
+
+  const lowData = lowContext.createImageData(lowWidth, lowHeight)
+  for (let cellY = 0; cellY < lowHeight; cellY += 1) {
+    for (let cellX = 0; cellX < lowWidth; cellX += 1) {
+      const color = quantizeRgb(
+        averageRectColor(pixels, width, height, cellX * blockSize, cellY * blockSize, blockSize, blockSize),
+        simplification * 0.85,
+      )
+      const offset = (cellX + cellY * lowWidth) * 4
+      lowData.data[offset] = color[0]
+      lowData.data[offset + 1] = color[1]
+      lowData.data[offset + 2] = color[2]
+      lowData.data[offset + 3] = 255
+    }
+  }
+  lowContext.putImageData(lowData, 0, 0)
+
+  // Bilinear upscale turns the averaged tiles into a smooth color field.
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
+  context.drawImage(lowCanvas, 0, 0, lowWidth, lowHeight, 0, 0, width, height)
+}
+
+// Capsule-shaped brush mark with round caps; always elongated, so it never
+// collapses into the square/diamond blob that the original brush produced at
+// low stroke length.
+function drawTaperedStroke(context: CanvasRenderingContext2D, stroke: StrokeSpec) {
+  const halfLength = stroke.length * 0.5
+  const halfWidth = stroke.width * 0.5
+  const [red, green, blue] = stroke.color
+  const capInset = Math.min(halfWidth, halfLength)
+
+  context.save()
+  context.translate(stroke.x, stroke.y)
+  context.rotate(stroke.angle)
+  context.globalAlpha = clamp(stroke.alpha, 0, 1)
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+  context.strokeStyle = rgbCss(stroke.color)
+  context.lineWidth = Math.max(1, stroke.width)
+  context.beginPath()
+  context.moveTo(-halfLength + capInset, 0)
+  context.lineTo(halfLength - capInset, 0)
+  context.stroke()
+
+  const bristleCount = Math.max(2, Math.round(stroke.width * 0.42))
+  for (let index = 0; index < bristleCount; index += 1) {
+    const row = (index / Math.max(1, bristleCount - 1) - 0.5) * stroke.width
+    const start = -halfLength * (0.84 + hashToUnit(stroke.seed, index, 0x1789) * 0.12)
+    const end = halfLength * (0.72 + hashToUnit(stroke.seed, index, 0x8921) * 0.22)
+    const amount = (hashToUnit(stroke.seed, index, 0x493f) - 0.5) * 38 * stroke.textureStrength
+    context.globalAlpha = clamp(stroke.alpha * (0.18 + stroke.textureStrength * 0.28), 0, 1)
+    context.strokeStyle = `rgb(${clamp(Math.round(red + amount), 0, 255)} ${clamp(Math.round(green + amount), 0, 255)} ${clamp(Math.round(blue + amount), 0, 255)})`
+    context.lineWidth = Math.max(0.75, stroke.width * (0.04 + hashToUnit(stroke.seed, index, 0xa711) * 0.08))
+    context.beginPath()
+    context.moveTo(start, row)
+    context.bezierCurveTo(start * 0.25, row + (hashToUnit(index, stroke.seed, 0x7f4a) - 0.5) * halfWidth, end * 0.55, row, end, row)
+    context.stroke()
+  }
+
+  context.restore()
 }
 
 function paintUnderpainting(
@@ -2086,4 +2405,188 @@ function labelsToAveragePixels(pixels: Uint8ClampedArray, labels: Int32Array, la
   }
 
   return output
+}
+
+function createColorCheckPixels(image: LoadedImage, settings: FilterSettings, computedWeights?: Float32Array) {
+  const { width, height, pixels } = image
+  const { labels, labelCount } = computeFelzenszwalbLabels(
+    image,
+    settings.colorCheckScale,
+    settings.colorCheckMinSize,
+    computedWeights,
+  )
+  const output = labelsToPerceptualPixels(pixels, labels, labelCount, settings.colorCheckSaturation)
+  const separator = Math.round(settings.colorCheckSeparator)
+  if (separator > 0) {
+    applySeparator(output, labels, width, height, separator)
+  }
+  return output
+}
+
+// Averages each region in OKLab (perceptually accurate, avoids the muddy,
+// desaturated result of averaging in sRGB) then restores chroma toward the
+// region's true saturation, which shrinks when slightly varying hues are mixed.
+function labelsToPerceptualPixels(
+  pixels: Uint8ClampedArray,
+  labels: Int32Array,
+  labelCount: number,
+  saturation: number,
+) {
+  const sums = new Float64Array(labelCount * 3)
+  const counts = new Uint32Array(labelCount)
+  const output = new Uint8ClampedArray(pixels.length)
+
+  for (let index = 0; index < labels.length; index += 1) {
+    const label = labels[index]
+    if (label < 0) {
+      continue
+    }
+
+    const pixelOffset = index * 4
+    const [l, a, b] = srgbToOklab(pixels[pixelOffset], pixels[pixelOffset + 1], pixels[pixelOffset + 2])
+    const labelOffset = label * 3
+    sums[labelOffset] += l
+    sums[labelOffset + 1] += a
+    sums[labelOffset + 2] += b
+    counts[label] += 1
+  }
+
+  const chromaFactor = 1 + clamp(saturation, 0, 1) * 0.6
+  const labelColors = new Uint8ClampedArray(labelCount * 3)
+  for (let label = 0; label < labelCount; label += 1) {
+    const count = counts[label]
+    if (count === 0) {
+      continue
+    }
+    const labelOffset = label * 3
+    const meanL = sums[labelOffset] / count
+    const meanA = (sums[labelOffset + 1] / count) * chromaFactor
+    const meanB = (sums[labelOffset + 2] / count) * chromaFactor
+    const [r, g, b] = oklabToSrgb(meanL, meanA, meanB)
+    labelColors[labelOffset] = r
+    labelColors[labelOffset + 1] = g
+    labelColors[labelOffset + 2] = b
+  }
+
+  for (let index = 0; index < labels.length; index += 1) {
+    const pixelOffset = index * 4
+    const label = labels[index]
+    if (label < 0 || counts[label] === 0) {
+      output[pixelOffset] = pixels[pixelOffset]
+      output[pixelOffset + 1] = pixels[pixelOffset + 1]
+      output[pixelOffset + 2] = pixels[pixelOffset + 2]
+      output[pixelOffset + 3] = 255
+      continue
+    }
+
+    const labelOffset = label * 3
+    output[pixelOffset] = labelColors[labelOffset]
+    output[pixelOffset + 1] = labelColors[labelOffset + 1]
+    output[pixelOffset + 2] = labelColors[labelOffset + 2]
+    output[pixelOffset + 3] = 255
+  }
+
+  return output
+}
+
+// Paints a neutral-gray line of the given thickness along region boundaries.
+function applySeparator(
+  output: Uint8ClampedArray,
+  labels: Int32Array,
+  width: number,
+  height: number,
+  thickness: number,
+) {
+  const count = width * height
+  let boundary = new Uint8Array(count)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = x + y * width
+      const label = labels[index]
+      if (
+        (x + 1 < width && labels[index + 1] !== label) ||
+        (y + 1 < height && labels[index + width] !== label)
+      ) {
+        boundary[index] = 1
+        if (x + 1 < width) boundary[index + 1] = 1
+        if (y + 1 < height) boundary[index + width] = 1
+      }
+    }
+  }
+
+  for (let pass = 1; pass < thickness; pass += 1) {
+    const dilated = new Uint8Array(boundary)
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = x + y * width
+        if (boundary[index]) {
+          continue
+        }
+        if (
+          (x > 0 && boundary[index - 1]) ||
+          (x + 1 < width && boundary[index + 1]) ||
+          (y > 0 && boundary[index - width]) ||
+          (y + 1 < height && boundary[index + width])
+        ) {
+          dilated[index] = 1
+        }
+      }
+    }
+    boundary = dilated
+  }
+
+  for (let index = 0; index < count; index += 1) {
+    if (!boundary[index]) {
+      continue
+    }
+    const pixelOffset = index * 4
+    output[pixelOffset] = 128
+    output[pixelOffset + 1] = 128
+    output[pixelOffset + 2] = 128
+  }
+}
+
+function srgbToOklab(r8: number, g8: number, b8: number): [number, number, number] {
+  const r = srgbChannelToLinear(r8 / 255)
+  const g = srgbChannelToLinear(g8 / 255)
+  const b = srgbChannelToLinear(b8 / 255)
+
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ]
+}
+
+function oklabToSrgb(L: number, a: number, b: number): [number, number, number] {
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b
+
+  const l = l_ * l_ * l_
+  const m = m_ * m_ * m_
+  const s = s_ * s_ * s_
+
+  const r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
+  const g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
+  const bb = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s
+
+  return [
+    linearChannelToSrgb(r) * 255,
+    linearChannelToSrgb(g) * 255,
+    linearChannelToSrgb(bb) * 255,
+  ]
+}
+
+function srgbChannelToLinear(c: number) {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+}
+
+function linearChannelToSrgb(c: number) {
+  const clamped = clamp(c, 0, 1)
+  return clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055
 }
