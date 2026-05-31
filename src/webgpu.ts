@@ -4,12 +4,13 @@ export type FilterId =
   | 'posterize'
   | 'edges'
   | 'flowBrush'
-  | 'strokePainter'
-  | 'detailPainter'
+  | 'painter'
   | 'slic'
-  | 'felzenszwalb'
   | 'adaptiveBrush'
   | 'colorCheck'
+
+export type PainterUnderpainting = 'blocks' | 'smooth'
+export type PainterDetailSource = 'edges' | 'color'
 
 export type FilterSettings = {
   filter: FilterId
@@ -22,12 +23,11 @@ export type FilterSettings = {
   slicSize: number
   slicCompactness: number
   slicSaturationPreserve: number
-  felzenszwalbScale: number
-  felzenszwalbMinSize: number
   colorCheckScale: number
   colorCheckMinSize: number
   colorCheckSaturation: number
   colorCheckSeparator: number
+  colorCheckPerceptual: boolean
   adaptiveLargeBrush: number
   adaptiveMediumBrush: number
   adaptiveSmallBrush: number
@@ -39,22 +39,16 @@ export type FilterSettings = {
   flowColorMerge: number
   flowEdgePreserve: number
   flowStrokeStrength: number
-  strokeAbstraction: number
-  strokeSize: number
-  strokeLength: number
-  strokeDetail: number
-  strokeEdgeFidelity: number
-  strokeColorSimplification: number
-  strokeTextureStrength: number
-  strokeLayers: number
-  detailAbstraction: number
-  detailSize: number
-  detailLength: number
-  detailFineness: number
-  detailEdgeFidelity: number
-  detailColorSimplification: number
-  detailTextureStrength: number
-  detailLayers: number
+  painterAbstraction: number
+  painterSize: number
+  painterLength: number
+  painterDetail: number
+  painterEdgeFidelity: number
+  painterColorSimplification: number
+  painterTexture: number
+  painterLayers: number
+  painterUnderpainting: PainterUnderpainting
+  painterDetailSource: PainterDetailSource
 }
 
 export type LoadedImage = {
@@ -84,12 +78,10 @@ const FILTER_INDEX: Record<FilterId, number> = {
   posterize: 2,
   edges: 3,
   flowBrush: 4,
-  strokePainter: 5,
+  painter: 5,
   slic: 6,
-  felzenszwalb: 7,
-  adaptiveBrush: 8,
-  detailPainter: 9,
-  colorCheck: 10,
+  adaptiveBrush: 7,
+  colorCheck: 8,
 }
 
 const MAX_WORKING_IMAGE_DIMENSION = 1280
@@ -893,10 +885,8 @@ export class WebGpuImageRenderer {
     if (
       !this.image ||
       (settings.filter !== 'slic' &&
-        settings.filter !== 'felzenszwalb' &&
         settings.filter !== 'adaptiveBrush' &&
-        settings.filter !== 'strokePainter' &&
-        settings.filter !== 'detailPainter' &&
+        settings.filter !== 'painter' &&
         settings.filter !== 'colorCheck')
     ) {
       return
@@ -909,16 +899,6 @@ export class WebGpuImageRenderer {
 
     if (settings.filter === 'slic') {
       await this.createSlicSegmentsGpu(settings.slicSize, settings.slicCompactness, settings.slicSaturationPreserve)
-    } else if (settings.filter === 'felzenszwalb') {
-      const edgeWeights = await this.createFelzenszwalbWeightsGpu()
-      const pixels = createFelzenszwalbSegments(
-        this.image,
-        settings.felzenszwalbScale,
-        settings.felzenszwalbMinSize,
-        edgeWeights,
-      )
-      this.segmentTexture?.destroy()
-      this.segmentTexture = this.createTextureFromPixels(pixels, this.image.width, this.image.height)
     } else if (settings.filter === 'colorCheck') {
       const edgeWeights = await this.createFelzenszwalbWeightsGpu()
       const pixels = createColorCheckPixels(this.image, settings, edgeWeights)
@@ -935,12 +915,8 @@ export class WebGpuImageRenderer {
       )
       this.segmentTexture?.destroy()
       this.segmentTexture = this.createTextureFromPixels(pixels, this.image.width, this.image.height)
-    } else if (settings.filter === 'strokePainter') {
-      const pixels = createStrokePainterPixels(this.image, settings)
-      this.segmentTexture?.destroy()
-      this.segmentTexture = this.createTextureFromPixels(pixels, this.image.width, this.image.height)
     } else {
-      const pixels = createDetailPainterPixels(this.image, settings)
+      const pixels = createPainterPixels(this.image, settings)
       this.segmentTexture?.destroy()
       this.segmentTexture = this.createTextureFromPixels(pixels, this.image.width, this.image.height)
     }
@@ -954,39 +930,23 @@ export class WebGpuImageRenderer {
       return `slic:${settings.slicSize}:${settings.slicCompactness}:${settings.slicSaturationPreserve}`
     }
 
-    if (settings.filter === 'felzenszwalb') {
-      return `felzenszwalb:${settings.felzenszwalbScale}:${settings.felzenszwalbMinSize}`
-    }
-
     if (settings.filter === 'colorCheck') {
-      return `colorCheck:${settings.colorCheckScale}:${settings.colorCheckMinSize}:${settings.colorCheckSaturation}:${settings.colorCheckSeparator}`
+      return `colorCheck:${settings.colorCheckScale}:${settings.colorCheckMinSize}:${settings.colorCheckSaturation}:${settings.colorCheckSeparator}:${settings.colorCheckPerceptual}`
     }
 
-    if (settings.filter === 'strokePainter') {
+    if (settings.filter === 'painter') {
       return [
-        'strokePainter',
-        settings.strokeAbstraction,
-        settings.strokeSize,
-        settings.strokeLength,
-        settings.strokeDetail,
-        settings.strokeEdgeFidelity,
-        settings.strokeColorSimplification,
-        settings.strokeTextureStrength,
-        settings.strokeLayers,
-      ].join(':')
-    }
-
-    if (settings.filter === 'detailPainter') {
-      return [
-        'detailPainter',
-        settings.detailAbstraction,
-        settings.detailSize,
-        settings.detailLength,
-        settings.detailFineness,
-        settings.detailEdgeFidelity,
-        settings.detailColorSimplification,
-        settings.detailTextureStrength,
-        settings.detailLayers,
+        'painter',
+        settings.painterAbstraction,
+        settings.painterSize,
+        settings.painterLength,
+        settings.painterDetail,
+        settings.painterEdgeFidelity,
+        settings.painterColorSimplification,
+        settings.painterTexture,
+        settings.painterLayers,
+        settings.painterUnderpainting,
+        settings.painterDetailSource,
       ].join(':')
     }
 
@@ -1287,16 +1247,6 @@ function getImagePixels(bitmap: ImageBitmap) {
   return context.getImageData(0, 0, bitmap.width, bitmap.height).data
 }
 
-function createFelzenszwalbSegments(
-  image: LoadedImage,
-  requestedScale: number,
-  requestedMinSize: number,
-  computedWeights?: Float32Array,
-) {
-  const { labels, labelCount } = computeFelzenszwalbLabels(image, requestedScale, requestedMinSize, computedWeights)
-  return labelsToAveragePixels(image.pixels, labels, labelCount)
-}
-
 function computeFelzenszwalbLabels(
   image: LoadedImage,
   requestedScale: number,
@@ -1476,126 +1426,52 @@ function createAdaptiveBrushSegments(
   return output
 }
 
-function createStrokePainterPixels(image: LoadedImage, settings: FilterSettings) {
+// Unified painter: lays an underpainting base, then layered brush strokes whose
+// density and size are driven either by structural edges or by local color
+// activity. Replaces the former Stroke Painter and Detail Painter, which were
+// the same algorithm differing only in underpainting style and detail source.
+function createPainterPixels(image: LoadedImage, settings: FilterSettings) {
   const { width, height, pixels } = image
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
   const context = canvas.getContext('2d', { willReadFrequently: true })
   if (!context) {
-    throw new Error('Could not create the stroke painting canvas.')
+    throw new Error('Could not create the painting canvas.')
   }
 
-  const abstraction = clamp(settings.strokeAbstraction, 0, 1)
-  const detailAmount = clamp(settings.strokeDetail, 0, 1)
-  const edgeFidelity = clamp(settings.strokeEdgeFidelity, 0, 1)
-  const simplification = clamp(settings.strokeColorSimplification, 0, 1)
-  const textureStrength = clamp(settings.strokeTextureStrength, 0, 1)
-  const baseSize = Math.max(3, Math.round(settings.strokeSize))
-  const lengthScale = clamp(settings.strokeLength, 1, 5)
-  const layers = Math.max(1, Math.min(4, Math.round(settings.strokeLayers)))
-  const detailMap = createPixelDetailMap(pixels, width, height)
+  const abstraction = clamp(settings.painterAbstraction, 0, 1)
+  const detailAmount = clamp(settings.painterDetail, 0, 1)
+  const edgeFidelity = clamp(settings.painterEdgeFidelity, 0, 1)
+  const simplification = clamp(settings.painterColorSimplification, 0, 1)
+  const textureStrength = clamp(settings.painterTexture, 0, 1)
+  const baseSize = Math.max(3, Math.round(settings.painterSize))
+  const lengthScale = clamp(settings.painterLength, 1, 5)
+  const layers = Math.max(1, Math.min(4, Math.round(settings.painterLayers)))
+  const useColorDetail = settings.painterDetailSource === 'color'
+
+  const edgeMap = createPixelDetailMap(pixels, width, height)
+  // Color mode drives finer passes toward shifting color; edge mode reuses the
+  // structural edge map for that role.
+  const activityMap = useColorDetail ? createColorActivityMap(pixels, width, height, baseSize) : edgeMap
   const flowField = createStrokeFlowField(pixels, width, height, Math.max(8, Math.round(baseSize * 2.2)))
 
-  paintUnderpainting(context, image, baseSize, abstraction, simplification)
+  // Smooth base avoids square underpainting tiles showing through short strokes;
+  // blocks give a more visibly chunky block-in.
+  if (settings.painterUnderpainting === 'smooth') {
+    paintSmoothUnderpainting(context, image, baseSize, abstraction, simplification)
+  } else {
+    paintUnderpainting(context, image, baseSize, abstraction, simplification)
+  }
 
   const layerScale = [3.8, 2.05, 1.02, 0.52]
   for (let layer = 0; layer < layers; layer += 1) {
     const size = Math.max(2, baseSize * layerScale[layer])
-    const spacing = Math.max(2, size * (layer === 0 ? 1.05 : 0.76))
+    // Color mode tightens the grid as detail rises so busy areas get more marks.
+    const spacing = useColorDetail
+      ? Math.max(1.5, size * (layer === 0 ? 1.05 : 0.74 - detailAmount * 0.3))
+      : Math.max(2, size * (layer === 0 ? 1.05 : 0.76))
     const fineLayer = layer / Math.max(1, layers - 1)
-    const alpha = 0.82 - fineLayer * 0.18
-
-    for (let y = -spacing; y < height + spacing; y += spacing) {
-      for (let x = -spacing; x < width + spacing; x += spacing) {
-        const jitterSeed = layer * 0x9e37 + Math.floor(x / spacing) * 193 + Math.floor(y / spacing) * 977
-        const jitter = layer < 2 ? 0.42 : 0.58
-        const px = Math.round(x + (hashToUnit(jitterSeed, layer, 0x2471) - 0.5) * spacing * jitter)
-        const py = Math.round(y + (hashToUnit(jitterSeed, layer, 0x71b5) - 0.5) * spacing * jitter)
-        if (px < 0 || py < 0 || px >= width || py >= height) {
-          continue
-        }
-
-        const detail = detailMap[px + py * width]
-        const broadProbability = layer === 0 ? 1 : 0.74 - abstraction * 0.22
-        const detailProbability = smoothstep(0.14 + abstraction * 0.22, 0.72, detail) * detailAmount
-        const probability = layer < 2 ? broadProbability : clamp(0.04 + detailProbability * 0.82, 0, 1)
-        if (hashToUnit(px, py, layer * 0x5151) > probability) {
-          continue
-        }
-
-        const gradient = luminanceGradient(pixels, width, height, px, py)
-        const flow = sampleStrokeFlow(flowField, px, py)
-        const edge = clamp(gradient.strength * 3.8, 0, 1)
-        const localAngle = Math.atan2(gradient.y, gradient.x) + Math.PI * 0.5
-        const coherentFallback = coherentFlowAngle(px, py, width, height)
-        const flowAngle = flow.confidence > 0.02 ? flow.angle : coherentFallback
-        const localInfluence = smoothstep(0.42, 0.92, detail) * edgeFidelity
-        const randomWobble = (hashToUnit(px, py, layer * 0xa53d) - 0.5) * (0.18 + fineLayer * 0.22)
-        const angle = blendAngles(flowAngle, localAngle, localInfluence) + randomWobble
-        const edgeLimiter = 1 - edge * edgeFidelity * 0.64
-        const quietAreaBoost = 1 + (1 - detail) * abstraction * (layer < 2 ? 0.95 : 0.25)
-        const strokeLength = size * lengthScale * (1.28 - fineLayer * 0.34) * edgeLimiter * quietAreaBoost
-        const strokeWidth = size * (0.68 - fineLayer * 0.22) * (1 + (1 - detail) * abstraction * 0.32)
-        const color = quantizedPixelColor(pixels, width, height, px, py, simplification)
-        const valueShift = (hashToUnit(px, py, layer * 0x345f) - 0.5) * 18 * textureStrength
-
-        drawBrushStroke(context, {
-          x: px,
-          y: py,
-          angle,
-          length: strokeLength,
-          width: strokeWidth,
-          color: shiftColor(color, valueShift),
-          alpha: alpha * (0.86 + hashToUnit(py, px, layer * 0x8849) * 0.2),
-          textureStrength,
-          seed: px * 17 + py * 31 + layer * 101,
-        })
-      }
-    }
-  }
-
-  return context.getImageData(0, 0, width, height).data
-}
-
-// Detail Painter is a stroke-painter variant tuned to (1) avoid the square
-// artifacts that appear at low stroke length and (2) drive stroke size and
-// density from how much the color is shifting locally, controlled by the
-// "Detail" (fineness) slider.
-function createDetailPainterPixels(image: LoadedImage, settings: FilterSettings) {
-  const { width, height, pixels } = image
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const context = canvas.getContext('2d', { willReadFrequently: true })
-  if (!context) {
-    throw new Error('Could not create the detail painting canvas.')
-  }
-
-  const abstraction = clamp(settings.detailAbstraction, 0, 1)
-  const fineness = clamp(settings.detailFineness, 0, 1)
-  const edgeFidelity = clamp(settings.detailEdgeFidelity, 0, 1)
-  const simplification = clamp(settings.detailColorSimplification, 0, 1)
-  const textureStrength = clamp(settings.detailTextureStrength, 0, 1)
-  const baseSize = Math.max(3, Math.round(settings.detailSize))
-  const lengthScale = clamp(settings.detailLength, 1, 5)
-  const layers = Math.max(1, Math.min(4, Math.round(settings.detailLayers)))
-
-  const edgeMap = createPixelDetailMap(pixels, width, height)
-  const colorActivity = createColorActivityMap(pixels, width, height, baseSize)
-  const flowField = createStrokeFlowField(pixels, width, height, Math.max(8, Math.round(baseSize * 2.2)))
-
-  // Smooth, gradient-filled base instead of hard-edged color blocks so that
-  // gaps between short strokes never reveal square underpainting tiles.
-  paintSmoothUnderpainting(context, image, baseSize, abstraction, simplification)
-
-  const layerScale = [3.8, 2.05, 1.02, 0.52]
-  for (let layer = 0; layer < layers; layer += 1) {
-    const layerSize = Math.max(2, baseSize * layerScale[layer])
-    const fineLayer = layer / Math.max(1, layers - 1)
-    // Higher fineness tightens the sampling grid so detailed passes lay down
-    // more, smaller strokes.
-    const spacing = Math.max(1.5, layerSize * (layer === 0 ? 1.05 : 0.74 - fineness * 0.3))
     const alpha = 0.82 - fineLayer * 0.18
 
     for (let y = -spacing; y < height + spacing; y += spacing) {
@@ -1609,39 +1485,43 @@ function createDetailPainterPixels(image: LoadedImage, settings: FilterSettings)
         }
 
         const index = px + py * width
-        const shift = colorActivity[index]
-        const edge = edgeMap[index]
-        const detail = clamp(Math.max(shift, edge * 0.7), 0, 1)
+        const edgeValue = edgeMap[index]
+        const activity = activityMap[index]
+        const detail = useColorDetail ? clamp(Math.max(activity, edgeValue * 0.7), 0, 1) : edgeValue
 
-        // Coarse layers cover everything; fine layers concentrate where the
-        // color is shifting, with the "Detail" slider boosting their reach.
         const broadProbability = layer === 0 ? 1 : 0.74 - abstraction * 0.22
-        const detailProbability = smoothstep(0.12, 0.7, shift) * (0.3 + fineness * 0.7)
-        const probability = layer < 2 ? broadProbability : clamp(0.05 + detailProbability, 0, 1)
+        const detailProbability = useColorDetail
+          ? smoothstep(0.12, 0.7, activity) * (0.3 + detailAmount * 0.7)
+          : smoothstep(0.14 + abstraction * 0.22, 0.72, detail) * detailAmount
+        const probability = layer < 2
+          ? broadProbability
+          : clamp((useColorDetail ? 0.05 : 0.04) + detailProbability * (useColorDetail ? 1 : 0.82), 0, 1)
         if (hashToUnit(px, py, layer * 0x5151) > probability) {
           continue
         }
 
         const gradient = luminanceGradient(pixels, width, height, px, py)
         const flow = sampleStrokeFlow(flowField, px, py)
-        const edgeStrength = clamp(gradient.strength * 3.8, 0, 1)
+        const edge = clamp(gradient.strength * 3.8, 0, 1)
         const localAngle = Math.atan2(gradient.y, gradient.x) + Math.PI * 0.5
         const coherentFallback = coherentFlowAngle(px, py, width, height)
         const flowAngle = flow.confidence > 0.02 ? flow.angle : coherentFallback
         const localInfluence = smoothstep(0.42, 0.92, detail) * edgeFidelity
         const randomWobble = (hashToUnit(px, py, layer * 0xa53d) - 0.5) * (0.18 + fineLayer * 0.22)
         const angle = blendAngles(flowAngle, localAngle, localInfluence) + randomWobble
-
-        // Shrink strokes in busy areas (scaled by fineness) for finer detail.
-        const detailShrink = 1 - shift * fineness * 0.72
-        const edgeLimiter = 1 - edgeStrength * edgeFidelity * 0.64
+        // Shrink strokes in busy areas (color mode) for finer detail.
+        const detailShrink = useColorDetail ? 1 - activity * detailAmount * 0.72 : 1
+        const edgeLimiter = 1 - edge * edgeFidelity * 0.64
         const quietAreaBoost = 1 + (1 - detail) * abstraction * (layer < 2 ? 0.95 : 0.25)
-        let strokeWidth = layerSize * (0.6 - fineLayer * 0.2) * (1 + (1 - detail) * abstraction * 0.3) * detailShrink
-        strokeWidth = Math.max(1.2, strokeWidth)
-        let strokeLength = layerSize * lengthScale * (1.2 - fineLayer * 0.32) * edgeLimiter * quietAreaBoost * detailShrink
-        // Keep every stroke elongated so short strokes read as marks, not squares.
-        strokeLength = Math.max(strokeLength, strokeWidth * 1.7)
-
+        const strokeWidth = Math.max(
+          1.2,
+          size * (0.64 - fineLayer * 0.21) * (1 + (1 - detail) * abstraction * 0.31) * detailShrink,
+        )
+        // Keep strokes elongated so short marks never read as squares.
+        const strokeLength = Math.max(
+          size * lengthScale * (1.25 - fineLayer * 0.33) * edgeLimiter * quietAreaBoost * detailShrink,
+          strokeWidth * 1.7,
+        )
         const color = quantizedPixelColor(pixels, width, height, px, py, simplification)
         const valueShift = (hashToUnit(px, py, layer * 0x345f) - 0.5) * 18 * textureStrength
 
@@ -1851,42 +1731,6 @@ type StrokeSpec = {
   alpha: number
   textureStrength: number
   seed: number
-}
-
-function drawBrushStroke(context: CanvasRenderingContext2D, stroke: StrokeSpec) {
-  const halfLength = stroke.length * 0.5
-  const halfWidth = stroke.width * 0.5
-  const [red, green, blue] = stroke.color
-
-  context.save()
-  context.translate(stroke.x, stroke.y)
-  context.rotate(stroke.angle)
-  context.globalAlpha = clamp(stroke.alpha, 0, 1)
-  context.fillStyle = rgbCss(stroke.color)
-  context.beginPath()
-  context.moveTo(-halfLength, -halfWidth * 0.18)
-  context.bezierCurveTo(-halfLength * 0.58, -halfWidth, halfLength * 0.55, -halfWidth * 0.82, halfLength, -halfWidth * 0.12)
-  context.bezierCurveTo(halfLength * 0.78, halfWidth * 0.78, -halfLength * 0.56, halfWidth, -halfLength, halfWidth * 0.16)
-  context.closePath()
-  context.fill()
-
-  const bristleCount = Math.max(2, Math.round(stroke.width * 0.42))
-  context.lineCap = 'round'
-  for (let index = 0; index < bristleCount; index += 1) {
-    const row = (index / Math.max(1, bristleCount - 1) - 0.5) * stroke.width
-    const start = -halfLength * (0.84 + hashToUnit(stroke.seed, index, 0x1789) * 0.12)
-    const end = halfLength * (0.72 + hashToUnit(stroke.seed, index, 0x8921) * 0.22)
-    const amount = (hashToUnit(stroke.seed, index, 0x493f) - 0.5) * 38 * stroke.textureStrength
-    context.globalAlpha = clamp(stroke.alpha * (0.18 + stroke.textureStrength * 0.28), 0, 1)
-    context.strokeStyle = `rgb(${clamp(Math.round(red + amount), 0, 255)} ${clamp(Math.round(green + amount), 0, 255)} ${clamp(Math.round(blue + amount), 0, 255)})`
-    context.lineWidth = Math.max(1, stroke.width * (0.04 + hashToUnit(stroke.seed, index, 0xa711) * 0.08))
-    context.beginPath()
-    context.moveTo(start, row)
-    context.bezierCurveTo(start * 0.25, row + (hashToUnit(index, stroke.seed, 0x7f4a) - 0.5) * halfWidth, end * 0.55, row, end, row)
-    context.stroke()
-  }
-
-  context.restore()
 }
 
 function createPixelDetailMap(pixels: Uint8ClampedArray, width: number, height: number) {
@@ -2415,7 +2259,11 @@ function createColorCheckPixels(image: LoadedImage, settings: FilterSettings, co
     settings.colorCheckMinSize,
     computedWeights,
   )
-  const output = labelsToPerceptualPixels(pixels, labels, labelCount, settings.colorCheckSaturation)
+  // Perceptual (OKLab) averaging keeps regions clean; the raw sRGB average is
+  // the simpler, muddier block-in offered as a toggle.
+  const output = settings.colorCheckPerceptual
+    ? labelsToPerceptualPixels(pixels, labels, labelCount, settings.colorCheckSaturation)
+    : labelsToAveragePixels(pixels, labels, labelCount)
   const separator = Math.round(settings.colorCheckSeparator)
   if (separator > 0) {
     applySeparator(output, labels, width, height, separator)

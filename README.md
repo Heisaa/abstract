@@ -6,7 +6,10 @@ A local browser app for turning imported images into oil-painting reference stud
 
 - Import images by file picker or drag and drop.
 - Preview filters with WebGPU/WGSL.
-- Adjust Kuwahara, value/posterize, edge overlay, SLIC, and Felzenszwalb filters.
+- Filters are grouped by workflow stage:
+  - **Analyze** — Value (posterize) and Edges.
+  - **Simplify** — Kuwahara, SLIC, and Color Check (perceptual color-field segmentation).
+  - **Render** — Flow Brush, Adaptive Brush, and Painter (block/smooth base with edge- or color-driven detail).
 - Toggle between original and filtered views.
 - Export the current filtered image as PNG or JPEG.
 

@@ -123,6 +123,24 @@
   font-weight: 650;
 }
 
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filter-group + .filter-group {
+  margin-top: 10px;
+}
+
+.filter-group-title {
+  color: #6c675d;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

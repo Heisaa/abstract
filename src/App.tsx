@@ -19,12 +19,11 @@ const DEFAULT_SETTINGS: FilterSettings = {
   slicSize: 36,
   slicCompactness: 12,
   slicSaturationPreserve: 0.55,
-  felzenszwalbScale: 450,
-  felzenszwalbMinSize: 48,
   colorCheckScale: 700,
   colorCheckMinSize: 120,
   colorCheckSaturation: 0.4,
   colorCheckSeparator: 0,
+  colorCheckPerceptual: true,
   adaptiveLargeBrush: 56,
   adaptiveMediumBrush: 28,
   adaptiveSmallBrush: 14,
@@ -36,35 +35,42 @@ const DEFAULT_SETTINGS: FilterSettings = {
   flowColorMerge: 0.62,
   flowEdgePreserve: 0.55,
   flowStrokeStrength: 0.95,
-  strokeAbstraction: 0.68,
-  strokeSize: 14,
-  strokeLength: 3.2,
-  strokeDetail: 0.28,
-  strokeEdgeFidelity: 0.66,
-  strokeColorSimplification: 0.52,
-  strokeTextureStrength: 0.58,
-  strokeLayers: 3,
-  detailAbstraction: 0.6,
-  detailSize: 14,
-  detailLength: 2.6,
-  detailFineness: 0.6,
-  detailEdgeFidelity: 0.66,
-  detailColorSimplification: 0.5,
-  detailTextureStrength: 0.5,
-  detailLayers: 3,
+  painterAbstraction: 0.64,
+  painterSize: 14,
+  painterLength: 3,
+  painterDetail: 0.45,
+  painterEdgeFidelity: 0.66,
+  painterColorSimplification: 0.5,
+  painterTexture: 0.55,
+  painterLayers: 3,
+  painterUnderpainting: 'smooth',
+  painterDetailSource: 'color',
 }
 
-const FILTERS: Array<{ id: FilterId; label: string }> = [
-  { id: 'kuwahara', label: 'Kuwahara' },
-  { id: 'posterize', label: 'Value' },
-  { id: 'edges', label: 'Edges' },
-  { id: 'strokePainter', label: 'Stroke Painter' },
-  { id: 'detailPainter', label: 'Detail Painter' },
-  { id: 'flowBrush', label: 'Flow Brush' },
-  { id: 'slic', label: 'SLIC' },
-  { id: 'adaptiveBrush', label: 'Adaptive Brush' },
-  { id: 'felzenszwalb', label: 'Felzenszwalb' },
-  { id: 'colorCheck', label: 'Color Check' },
+const FILTER_GROUPS: Array<{ title: string; filters: Array<{ id: FilterId; label: string }> }> = [
+  {
+    title: 'Analyze',
+    filters: [
+      { id: 'posterize', label: 'Value' },
+      { id: 'edges', label: 'Edges' },
+    ],
+  },
+  {
+    title: 'Simplify',
+    filters: [
+      { id: 'kuwahara', label: 'Kuwahara' },
+      { id: 'slic', label: 'SLIC' },
+      { id: 'colorCheck', label: 'Color Check' },
+    ],
+  },
+  {
+    title: 'Render',
+    filters: [
+      { id: 'flowBrush', label: 'Flow Brush' },
+      { id: 'adaptiveBrush', label: 'Adaptive Brush' },
+      { id: 'painter', label: 'Painter' },
+    ],
+  },
 ]
 
 const IMAGE_FILE_EXTENSIONS = ['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.jfif', '.png', '.webp']
@@ -502,18 +508,23 @@ function App() {
 
           <div className="field">
             <span className="field-label">Filter</span>
-            <div className="segmented">
-              {FILTERS.map((filter) => (
-                <button
-                  key={filter.id}
-                  type="button"
-                  className={settings.filter === filter.id ? 'active' : ''}
-                  onClick={() => updateSetting('filter', filter.id)}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
+            {FILTER_GROUPS.map((group) => (
+              <div key={group.title} className="filter-group">
+                <span className="filter-group-title">{group.title}</span>
+                <div className="segmented">
+                  {group.filters.map((filter) => (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      className={settings.filter === filter.id ? 'active' : ''}
+                      onClick={() => updateSetting('filter', filter.id)}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
 
           {settings.filter === 'kuwahara' ? (
@@ -555,29 +566,48 @@ function App() {
             </>
           ) : null}
 
-          {settings.filter === 'strokePainter' ? (
+          {settings.filter === 'painter' ? (
             <>
-              <Slider label="Abstraction" min={0} max={1} step={0.01} value={settings.strokeAbstraction} onChange={(value) => updateSetting('strokeAbstraction', value)} />
-              <Slider label="Stroke Size" min={4} max={32} step={1} value={settings.strokeSize} onChange={(value) => updateSetting('strokeSize', value)} />
-              <Slider label="Stroke Length" min={1} max={5} step={0.1} value={settings.strokeLength} onChange={(value) => updateSetting('strokeLength', value)} />
-              <Slider label="Detail Amount" min={0} max={1} step={0.01} value={settings.strokeDetail} onChange={(value) => updateSetting('strokeDetail', value)} />
-              <Slider label="Edge Fidelity" min={0} max={1} step={0.01} value={settings.strokeEdgeFidelity} onChange={(value) => updateSetting('strokeEdgeFidelity', value)} />
-              <Slider label="Color Simplify" min={0} max={1} step={0.01} value={settings.strokeColorSimplification} onChange={(value) => updateSetting('strokeColorSimplification', value)} />
-              <Slider label="Texture" min={0} max={1} step={0.01} value={settings.strokeTextureStrength} onChange={(value) => updateSetting('strokeTextureStrength', value)} />
-              <Slider label="Layers" min={1} max={4} step={1} value={settings.strokeLayers} onChange={(value) => updateSetting('strokeLayers', value)} />
-            </>
-          ) : null}
-
-          {settings.filter === 'detailPainter' ? (
-            <>
-              <Slider label="Abstraction" min={0} max={1} step={0.01} value={settings.detailAbstraction} onChange={(value) => updateSetting('detailAbstraction', value)} />
-              <Slider label="Stroke Size" min={4} max={32} step={1} value={settings.detailSize} onChange={(value) => updateSetting('detailSize', value)} />
-              <Slider label="Stroke Length" min={1} max={5} step={0.1} value={settings.detailLength} onChange={(value) => updateSetting('detailLength', value)} />
-              <Slider label="Detail" min={0} max={1} step={0.01} value={settings.detailFineness} onChange={(value) => updateSetting('detailFineness', value)} />
-              <Slider label="Edge Fidelity" min={0} max={1} step={0.01} value={settings.detailEdgeFidelity} onChange={(value) => updateSetting('detailEdgeFidelity', value)} />
-              <Slider label="Color Simplify" min={0} max={1} step={0.01} value={settings.detailColorSimplification} onChange={(value) => updateSetting('detailColorSimplification', value)} />
-              <Slider label="Texture" min={0} max={1} step={0.01} value={settings.detailTextureStrength} onChange={(value) => updateSetting('detailTextureStrength', value)} />
-              <Slider label="Layers" min={1} max={4} step={1} value={settings.detailLayers} onChange={(value) => updateSetting('detailLayers', value)} />
+              <div className="segmented">
+                <button
+                  type="button"
+                  className={settings.painterUnderpainting === 'smooth' ? 'active' : ''}
+                  onClick={() => updateSetting('painterUnderpainting', 'smooth')}
+                >
+                  Smooth base
+                </button>
+                <button
+                  type="button"
+                  className={settings.painterUnderpainting === 'blocks' ? 'active' : ''}
+                  onClick={() => updateSetting('painterUnderpainting', 'blocks')}
+                >
+                  Block base
+                </button>
+              </div>
+              <div className="segmented">
+                <button
+                  type="button"
+                  className={settings.painterDetailSource === 'color' ? 'active' : ''}
+                  onClick={() => updateSetting('painterDetailSource', 'color')}
+                >
+                  Color detail
+                </button>
+                <button
+                  type="button"
+                  className={settings.painterDetailSource === 'edges' ? 'active' : ''}
+                  onClick={() => updateSetting('painterDetailSource', 'edges')}
+                >
+                  Edge detail
+                </button>
+              </div>
+              <Slider label="Abstraction" min={0} max={1} step={0.01} value={settings.painterAbstraction} onChange={(value) => updateSetting('painterAbstraction', value)} />
+              <Slider label="Stroke Size" min={4} max={32} step={1} value={settings.painterSize} onChange={(value) => updateSetting('painterSize', value)} />
+              <Slider label="Stroke Length" min={1} max={5} step={0.1} value={settings.painterLength} onChange={(value) => updateSetting('painterLength', value)} />
+              <Slider label="Detail" min={0} max={1} step={0.01} value={settings.painterDetail} onChange={(value) => updateSetting('painterDetail', value)} />
+              <Slider label="Edge Fidelity" min={0} max={1} step={0.01} value={settings.painterEdgeFidelity} onChange={(value) => updateSetting('painterEdgeFidelity', value)} />
+              <Slider label="Color Simplify" min={0} max={1} step={0.01} value={settings.painterColorSimplification} onChange={(value) => updateSetting('painterColorSimplification', value)} />
+              <Slider label="Texture" min={0} max={1} step={0.01} value={settings.painterTexture} onChange={(value) => updateSetting('painterTexture', value)} />
+              <Slider label="Layers" min={1} max={4} step={1} value={settings.painterLayers} onChange={(value) => updateSetting('painterLayers', value)} />
             </>
           ) : null}
 
@@ -599,19 +629,20 @@ function App() {
             </>
           ) : null}
 
-          {settings.filter === 'felzenszwalb' ? (
-            <>
-              <Slider label="Scale" min={50} max={1500} step={10} value={settings.felzenszwalbScale} onChange={(value) => updateSetting('felzenszwalbScale', value)} />
-              <Slider label="Min Size" min={4} max={300} step={1} value={settings.felzenszwalbMinSize} onChange={(value) => updateSetting('felzenszwalbMinSize', value)} />
-            </>
-          ) : null}
-
           {settings.filter === 'colorCheck' ? (
             <>
               <Slider label="Field Size" min={50} max={1500} step={10} value={settings.colorCheckScale} onChange={(value) => updateSetting('colorCheckScale', value)} />
               <Slider label="Min Field Size" min={16} max={600} step={4} value={settings.colorCheckMinSize} onChange={(value) => updateSetting('colorCheckMinSize', value)} />
               <Slider label="Saturation" min={0} max={1} step={0.01} value={settings.colorCheckSaturation} onChange={(value) => updateSetting('colorCheckSaturation', value)} />
               <Slider label="Separator" min={0} max={3} step={1} value={settings.colorCheckSeparator} onChange={(value) => updateSetting('colorCheckSeparator', value)} />
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.colorCheckPerceptual}
+                  onChange={(event) => updateSetting('colorCheckPerceptual', event.currentTarget.checked)}
+                />
+                Perceptual color
+              </label>
             </>
           ) : null}
 
