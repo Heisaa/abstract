@@ -2,7 +2,6 @@
 
 - Build a local image-reference tool for oil painting studies.
 - Recommended stack: Vite, TypeScript, React, WebGPU/WGSL shaders.
-- Start as a browser-local app; package later with Tauri 2 if a desktop shell is needed.
 - Core workflow: import image, choose one filter, adjust relevant parameters, preview quickly, export filtered image.
 - Initial filters: Kuwahara, posterize/value study, edge overlay, blur/sharpen, and later superpixel abstraction.
 - Filter design should prioritize painter study over cosmetic effects: identify large paintable color/value masses, approximate brush-scale fields, and preserve only selective detail where structure matters.
