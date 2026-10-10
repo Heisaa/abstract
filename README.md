@@ -50,6 +50,10 @@ npm run dev
 
 Use a WebGPU-capable browser. If WebGPU is unavailable, the app shows an in-app message.
 
+## Deployment
+
+Every push to `master` builds the app, runs the tests, and publishes `dist/` to GitHub Pages (`.github/workflows/deploy.yml`). One-time setup in the GitHub repository: Settings → Pages → Build and deployment → Source: **GitHub Actions**. Asset paths are relative (`base: './'`), so the site works at `https://<user>.github.io/<repo>/` under any repository name.
+
 ## Checks
 
 ```sh
